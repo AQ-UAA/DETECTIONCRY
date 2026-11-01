@@ -5,7 +5,6 @@ import requests
 import numpy as np
 import librosa
 import streamlit as st
-import streamlit.components.v1 as components
 
 # =====================================================================
 # 1. KONFIGURASI HALAMAN & GAYA UI (RESPONSIF MOBILE & PC)
@@ -26,10 +25,12 @@ st.markdown("""
     .alert-crying {
         padding: 20px; border-radius: 10px; background-color: #3b181e;
         border-left: 6px solid #dc2626; color: #fca5a5; font-weight: 600;
+        margin-bottom: 12px;
     }
     .alert-safe {
         padding: 20px; border-radius: 10px; background-color: #143323;
         border-left: 6px solid #16a34a; color: #86efac; font-weight: 600;
+        margin-bottom: 12px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -83,21 +84,30 @@ def extract_182_features(y: np.ndarray, sr: int = SAMPLE_RATE) -> np.ndarray:
     return np.hstack([feat_mean, feat_std]).reshape(1, -1)
 
 # =====================================================================
-# 4. FUNGSI PENGIRIMAN NOTIFIKASI WHATSAPP DENGAN COOLDOWN 30 DETIK
+# 4. FUNGSI PENGIRIMAN NOTIFIKASI WHATSAPP (MENDUKUNG MODE TEST & COOLDOWN)
 # =====================================================================
-def kirim_notifikasi_wa(nomor_wa: str, confidence: float, metode: str, url_webhook: str, secret_key: str, token_fonnte: str):
-    """Mengirim notifikasi ke WhatsApp via Webhook Bot Panel atau Fonnte dengan batas cooldown 30 detik."""
+def kirim_notifikasi_wa(
+    nomor_wa: str,
+    confidence: float,
+    metode: str,
+    url_webhook: str,
+    secret_key: str,
+    token_fonnte: str,
+    is_test: bool = False
+):
+    """Mengirim notifikasi ke WhatsApp via Webhook Bot Panel atau Fonnte."""
     waktu_sekarang = time.time()
     selisih_waktu = waktu_sekarang - st.session_state.last_wa_sent_time
 
-    if selisih_waktu < COOLDOWN_WA_DETIK:
+    # Cooldown 30 detik hanya berlaku untuk deteksi suara asli, bukan tombol Test
+    if not is_test and selisih_waktu < COOLDOWN_WA_DETIK:
         sisa_cooldown = int(COOLDOWN_WA_DETIK - selisih_waktu)
-        return False, f"Ditahan oleh Cooldown Anti-Spam ({sisa_cooldown} detik tersisa sebelum notif WA berikutnya)."
+        return False, f"Ditahan Cooldown Anti-Spam ({sisa_cooldown} detik tersisa sebelum notif berikutnya)."
 
     pesan = (
         f"🚨 *PERINGATAN DETEKSI TANGISAN BAYI* 🚨\n\n"
         f"Sistem mendeteksi suara bayi sedang menangis!\n"
-        f"• *Status:* Bayi Menangis (Kelas 1)\n"
+        f"• *Status:* {'UJI COBA KONEKSI (TEST)' if is_test else 'Bayi Menangis (Kelas 1)'}\n"
         f"• *Model:* SVM (RBF Kernel)\n"
         f"• *Tingkat Keyakinan:* {confidence:.2f}%\n"
         f"• *Waktu Deteksi:* {time.strftime('%H:%M:%S WIB')}\n\n"
@@ -107,34 +117,41 @@ def kirim_notifikasi_wa(nomor_wa: str, confidence: float, metode: str, url_webho
     try:
         if metode == "Opsi A: Webhook Bot WA Panel (Public URL)":
             if not url_webhook:
-                return False, "URL Webhook Panel belum diisi di pengaturan."
+                return False, "URL Webhook Panel belum diisi di sidebar."
             resp = requests.post(
                 url_webhook,
-                json={"target": nomor_wa, "confidence": round(confidence, 2), "secret_key": secret_key},
-                timeout=10
+                headers={"x-api-key": secret_key},
+                json={
+                    "target": nomor_wa,
+                    "confidence": round(confidence, 2),
+                    "secret_key": secret_key
+                },
+                timeout=12
             )
             if resp.status_code == 200:
-                st.session_state.last_wa_sent_time = waktu_sekarang
+                if not is_test:
+                    st.session_state.last_wa_sent_time = waktu_sekarang
                 return True, f"Notifikasi WA berhasil dikirim ke {nomor_wa} (via Panel Bot)."
             return False, f"Gagal kirim ke Panel Bot (HTTP {resp.status_code}): {resp.text}"
 
         else:  # Opsi B: API Fonnte
             if not token_fonnte:
-                return False, "Token API Fonnte belum diisi di pengaturan."
+                return False, "Token API Fonnte belum diisi di sidebar."
             resp = requests.post(
                 "https://api.fonnte.com/send",
                 headers={"Authorization": token_fonnte},
                 data={"target": nomor_wa, "message": pesan},
-                timeout=10
+                timeout=12
             )
             res_json = resp.json()
             if resp.status_code == 200 and res_json.get("status"):
-                st.session_state.last_wa_sent_time = waktu_sekarang
+                if not is_test:
+                    st.session_state.last_wa_sent_time = waktu_sekarang
                 return True, f"Notifikasi WA berhasil dikirim ke {nomor_wa} (via Fonnte)."
             return False, f"Gagal kirim via Fonnte: {res_json}"
 
     except Exception as e:
-        return False, f"Kendala jaringan saat mengirim WA: {e}"
+        return False, f"Kendala jaringan saat menghubungi server WA: {e}"
 
 # =====================================================================
 # 5. INISIALISASI STATE APLIKASI
@@ -160,7 +177,7 @@ with st.sidebar:
     if metode_wa == "Opsi A: Webhook Bot WA Panel (Public URL)":
         url_webhook = st.text_input(
             "Endpoint Public URL Panel:",
-            value=st.secrets.get("WEBHOOK_URL", "https://notifbayi.domainpanel.com/kirim-notif")
+            value=st.secrets.get("WEBHOOK_URL", "https://abssbot.rbhost.my.id/kirim-notif")
         )
         secret_key = st.text_input(
             "Secret Key Webhook:",
@@ -177,10 +194,10 @@ with st.sidebar:
         url_webhook = ""
         secret_key = ""
 
-    st.caption("💡 Tip: Anda juga dapat menyimpan token/URL di menu *Secrets* Streamlit Cloud agar otomatis terisi.")
+    st.caption("Pastikan Bot WA di Panel sudah berstatus aktif dan tersambung.")
 
 # =====================================================================
-# 7. ANTARMUKA UTAMA (INPUT NOMOR WA & KONTROL MIKROFON)
+# 7. ANTARMUKA UTAMA (INPUT NOMOR WA, TOMBOL TEST, & KONTROL MIKROFON)
 # =====================================================================
 st.title("👶 Deteksi Suara Tangisan Bayi Real-Time")
 st.write("Sistem Pemantauan Pintar Berbasis **SVM (RBF Kernel)** dengan Integrasi Peringatan **WhatsApp**.")
@@ -199,13 +216,14 @@ if nomor_wa_clean.startswith("0"):
 nomor_wa_valid = len(nomor_wa_clean) >= 10
 
 if not nomor_wa_valid:
-    st.warning("⚠️ Silakan masukkan nomor WhatsApp yang valid (minimal 10 digit) untuk membuka kunci mikrofon.")
+    st.warning("⚠️ Silakan masukkan nomor WhatsApp yang valid (minimal 10 digit) untuk membuka kunci mikrofon dan tombol test.")
 
-# Tombol Saklar Hidup/Mati Mikrofon (Sesuai aturan: Tidak bisa hidup tanpa nomor WA, tidak mati sebelum dimatikan)
-col_btn1, col_btn2 = st.columns(2)
+# Baris Tombol Kontrol (Hidupkan Mic, Matikan Mic, dan Test Notif WA)
+col_btn1, col_btn2, col_btn3 = st.columns(3)
+
 with col_btn1:
     if st.button(
-        "🎙️ Hidupkan Pemantauan Mikrofon",
+        "🎙️ Hidupkan Mic",
         disabled=(not nomor_wa_valid or st.session_state.mic_active),
         use_container_width=True,
         type="primary"
@@ -215,7 +233,7 @@ with col_btn1:
 
 with col_btn2:
     if st.button(
-        "⏹️ Matikan Mikrofon",
+        "⏹️ Matikan Mic",
         disabled=(not st.session_state.mic_active),
         use_container_width=True
     ):
@@ -223,45 +241,44 @@ with col_btn2:
         st.session_state.last_audio_hash = None
         st.rerun()
 
+with col_btn3:
+    if st.button(
+        "📲 Test Kirim WA",
+        disabled=(not nomor_wa_valid),
+        use_container_width=True,
+        help="Kirim pesan tes langsung ke nomor WA untuk mengecek koneksi Bot Panel"
+    ):
+        with st.spinner(f"Mengirim pesan tes ke {nomor_wa_clean}..."):
+            ok, msg_test = kirim_notifikasi_wa(
+                nomor_wa=nomor_wa_clean,
+                confidence=99.99,
+                metode=metode_wa,
+                url_webhook=url_webhook,
+                secret_key=secret_key,
+                token_fonnte=token_fonnte,
+                is_test=True
+            )
+            if ok:
+                st.toast("Test Notifikasi WA Berhasil!", icon="✅")
+                st.success(f"✅ **Test Berhasil:** {msg_test}")
+            else:
+                st.error(f"❌ **Test Gagal:** {msg_test}")
+
 st.divider()
 
 # =====================================================================
 # 8. PEREKAMAN MIKROFON & KLASIFIKASI REAL-TIME
 # =====================================================================
 if not st.session_state.mic_active:
-    st.info("🔒 **Status Mikrofon: NONAKTIF.** Masukkan nomor WhatsApp dan klik **Hidupkan Pemantauan Mikrofon** untuk memulai deteksi suara.")
+    st.info("🔒 **Status Mikrofon: NONAKTIF.** Masukkan nomor WhatsApp lalu klik **🎙️ Hidupkan Mic** untuk memulai deteksi suara, atau klik **📲 Test Kirim WA** untuk menguji koneksi bot.")
 else:
-    st.success(f"🟢 **Status Mikrofon: AKTIF MEMANTAU** | Target Notifikasi WA: `{nomor_wa_clean}` (Cooldown: {COOLDOWN_WA_DETIK} detik)")
+    st.success(f"🟢 **Status Mikrofon: AKTIF MEMANTAU** | Target WA: `{nomor_wa_clean}` (Cooldown Anti-Spam: {COOLDOWN_WA_DETIK} detik)")
 
-    mode_input = st.tabs(["🎙️ Mikrofon Real-Time (Otomatis Per 5 Detik / Manual)", "📂 Uji Upload File Audio (.wav/.mp3)"])
+    tab_mic, tab_upload = st.tabs(["🎙️ Perekam Mikrofon Langsung", "📂 Uji Upload File Audio (.wav/.mp3)"])
 
-    with mode_input[0]:
-        auto_loop = st.checkbox(
-            "🔄 Aktifkan Siklus Rekam Otomatis Berkelanjutan (Otomatis memotong & mengirim segmen tiap 5 detik selama mikrofon hidup)",
-            value=True
-        )
-
-        audio_buffer = st.audio_input("Perekam Suara Aktif (Berfungsi di Browser HP & PC):")
-
-        # Script JS opsional untuk menjaga siklus rekam 5 detik berjalan terus-menerus tanpa perlu klik ulang
-        if auto_loop:
-            components.html(
-                """
-                <script>
-                const doc = window.parent.document;
-                setInterval(() => {
-                    const buttons = doc.querySelectorAll('button[aria-label*="Record"], button[aria-label*="Stop"], button[data-testid="stAudioInputActionButton"]');
-                    buttons.forEach(btn => {
-                        const label = (btn.getAttribute('aria-label') || '').toLowerCase();
-                        if (label.includes('record') || label.includes('stop')) {
-                            btn.click();
-                        }
-                    });
-                }, 5500);
-                </script>
-                """,
-                height=0,
-            )
+    with tab_mic:
+        st.caption("Klik ikon mikrofon di bawah untuk merekam suara sekitar (minimal 3–5 detik), lalu klik ikon berhenti (⏹️) untuk langsung melihat hasil deteksi real-time.")
+        audio_buffer = st.audio_input("Rekam Suara Sekitar (Mikrofon HP / PC):")
 
         if audio_buffer is not None:
             raw_bytes = audio_buffer.getvalue()
@@ -283,12 +300,12 @@ else:
 
                         if prediksi == 1:
                             st.markdown(
-                                f"<div class='alert-crying'>🚨 [REAL-TIME {waktu_str}] TERDETEKSI BAYI MENANGIS! "
+                                f"<div class='alert-crying'>🚨 [DETEKSI {waktu_str}] TERDETEKSI BAYI MENANGIS! "
                                 f"(Keyakinan Model: {conf_nangis:.2f}%)</div>",
                                 unsafe_allow_html=True
                             )
                             terkirim, info_wa = kirim_notifikasi_wa(
-                                nomor_wa_clean, conf_nangis, metode_wa, url_webhook, secret_key, token_fonnte
+                                nomor_wa_clean, conf_nangis, metode_wa, url_webhook, secret_key, token_fonnte, is_test=False
                             )
                             if terkirim:
                                 st.toast(info_wa, icon="✅")
@@ -297,7 +314,7 @@ else:
                                 st.warning(f"⏳ **Status WhatsApp:** {info_wa}")
                         else:
                             st.markdown(
-                                f"<div class='alert-safe'>✅ [REAL-TIME {waktu_str}] KONDISI AMAN / BUKAN TANGISAN "
+                                f"<div class='alert-safe'>✅ [DETEKSI {waktu_str}] KONDISI AMAN / BUKAN TANGISAN "
                                 f"(Keyakinan Bukan Nangis: {conf_bukan:.2f}%)</div>",
                                 unsafe_allow_html=True
                             )
@@ -305,6 +322,7 @@ else:
 
                         st.session_state.riwayat_deteksi.insert(0, {
                             "Waktu": waktu_str,
+                            "Sumber": "Mikrofon",
                             "Hasil Klasifikasi": "🚨 Bayi Menangis (1)" if prediksi == 1 else "✅ Bukan Nangis (0)",
                             "Probabilitas Nangis": f"{conf_nangis:.2f}%",
                             "Status Notifikasi WA": info_wa
@@ -312,47 +330,51 @@ else:
                     except Exception as err:
                         st.error(f"Gagal memproses sinyal audio: {err}")
 
-    with mode_input[1]:
+    with tab_upload:
         uploaded_file = st.file_uploader("Unggah file rekaman (.wav atau .mp3) untuk pengujian:", type=["wav", "mp3"])
         if uploaded_file is not None:
             st.audio(uploaded_file)
-            if st.button("🔍 Analisis File Audio & Kirim Notif Bila Menangis"):
+            if st.button("🔍 Analisis File Audio & Kirim Notif Bila Menangis", use_container_width=True):
                 with st.spinner("Mengekstrak 182 fitur akustik..."):
-                    y_up, sr_up = librosa.load(uploaded_file, sr=SAMPLE_RATE, mono=True)
-                    fitur_182 = extract_182_features(y_up, sr_up)
-                    fitur_scaled = scaler_audio.transform(fitur_182)
+                    try:
+                        y_up, sr_up = librosa.load(uploaded_file, sr=SAMPLE_RATE, mono=True)
+                        fitur_182 = extract_182_features(y_up, sr_up)
+                        fitur_scaled = scaler_audio.transform(fitur_182)
 
-                    prediksi = int(model_svm.predict(fitur_scaled)[0])
-                    probabilitas = model_svm.predict_proba(fitur_scaled)[0]
-                    conf_nangis = probabilitas[1] * 100
-                    conf_bukan = probabilitas[0] * 100
-                    waktu_str = time.strftime("%H:%M:%S")
+                        prediksi = int(model_svm.predict(fitur_scaled)[0])
+                        probabilitas = model_svm.predict_proba(fitur_scaled)[0]
+                        conf_nangis = probabilitas[1] * 100
+                        conf_bukan = probabilitas[0] * 100
+                        waktu_str = time.strftime("%H:%M:%S")
 
-                    if prediksi == 1:
-                        st.markdown(
-                            f"<div class='alert-crying'>🚨 TERDETEKSI BAYI MENANGIS! (Confidence: {conf_nangis:.2f}%)</div>",
-                            unsafe_allow_html=True
-                        )
-                        terkirim, info_wa = kirim_notifikasi_wa(
-                            nomor_wa_clean, conf_nangis, metode_wa, url_webhook, secret_key, token_fonnte
-                        )
-                        if terkirim:
-                            st.success(f"📨 {info_wa}")
+                        if prediksi == 1:
+                            st.markdown(
+                                f"<div class='alert-crying'>🚨 TERDETEKSI BAYI MENANGIS! (Confidence: {conf_nangis:.2f}%)</div>",
+                                unsafe_allow_html=True
+                            )
+                            terkirim, info_wa = kirim_notifikasi_wa(
+                                nomor_wa_clean, conf_nangis, metode_wa, url_webhook, secret_key, token_fonnte, is_test=False
+                            )
+                            if terkirim:
+                                st.success(f"📨 {info_wa}")
+                            else:
+                                st.warning(f"⏳ {info_wa}")
                         else:
-                            st.warning(f"⏳ {info_wa}")
-                    else:
-                        st.markdown(
-                            f"<div class='alert-safe'>✅ BUKAN TANGISAN BAYI (Confidence Aman: {conf_bukan:.2f}%)</div>",
-                            unsafe_allow_html=True
-                        )
-                        info_wa = "Tidak dikirim (Suara bukan tangisan)"
+                            st.markdown(
+                                f"<div class='alert-safe'>✅ BUKAN TANGISAN BAYI (Confidence Aman: {conf_bukan:.2f}%)</div>",
+                                unsafe_allow_html=True
+                            )
+                            info_wa = "Tidak dikirim (Suara bukan tangisan)"
 
-                    st.session_state.riwayat_deteksi.insert(0, {
-                        "Waktu": waktu_str,
-                        "Hasil Klasifikasi": "🚨 Bayi Menangis (1)" if prediksi == 1 else "✅ Bukan Nangis (0)",
-                        "Probabilitas Nangis": f"{conf_nangis:.2f}%",
-                        "Status Notifikasi WA": info_wa
-                    })
+                        st.session_state.riwayat_deteksi.insert(0, {
+                            "Waktu": waktu_str,
+                            "Sumber": f"File ({uploaded_file.name})",
+                            "Hasil Klasifikasi": "🚨 Bayi Menangis (1)" if prediksi == 1 else "✅ Bukan Nangis (0)",
+                            "Probabilitas Nangis": f"{conf_nangis:.2f}%",
+                            "Status Notifikasi WA": info_wa
+                        })
+                    except Exception as err:
+                        st.error(f"Gagal memproses file audio: {err}")
 
 # =====================================================================
 # 9. LOG RIWAYAT DETEKSI REAL-TIME DI LAYAR PERANGKAT LUNAK
