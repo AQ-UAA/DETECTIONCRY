@@ -1,9 +1,9 @@
 streamlit>=1.39.0
+streamlit-webrtc
+av
 numpy
-pandas
 librosa
 soundfile
 scikit-learn
-xgboost
 joblib
 requests
