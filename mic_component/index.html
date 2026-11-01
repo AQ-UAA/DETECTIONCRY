@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; background: transparent; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #e9edef; }
+  .box { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px;
+         background: #111b21; border: 1px solid #1f2c34; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: #667781; flex: none; }
+  .dot.on { background: #ef4444; animation: blink 1.2s infinite; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .main { flex: 1; min-width: 0; }
+  #t { font-weight: 700; font-size: 14px; }
+  #s { font-size: 12px; color: #8696a0; margin-top: 3px; }
+  .bar { height: 6px; border-radius: 99px; background: #202c33; overflow: hidden; margin-top: 7px; }
+  #lvl { height: 100%; width: 0; background: linear-gradient(90deg, #00a884, #53bdeb); transition: width .1s; }
+  .err { color: #fca5a5; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="dot" id="dot"></div>
+  <div class="main">
+    <div id="t">Meminta izin mikrofon…</div>
+    <div class="bar"><div id="lvl"></div></div>
+    <div id="s">Izinkan akses mikrofon di browser.</div>
+  </div>
+</div>
+
+<script>
+const OUT_SR = 22050;
+let started = false, chunkSec = 10;
+let ctx = null, stream = null, proc = null, wake = null;
+let buf = [], bufLen = 0, n = 0, level = 0, lastSecShown = -1;
+const sess = Date.now().toString(36);
+const $ = (id) => document.getElementById(id);
+
+function send(type, data) {
+  window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type: type }, data || {}), "*");
+}
+function setHeight() { send("streamlit:setFrameHeight", { height: 80 }); }
+
+window.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "streamlit:render") {
+    const a = e.data.args || {};
+    if (a.chunk_seconds) chunkSec = a.chunk_seconds;
+    if (!started) { started = true; start(); }
+    setHeight();
+  }
+});
+send("streamlit:componentReady", { apiVersion: 1 });
+setHeight();
+
+function showError(msg) {
+  $("t").textContent = "Mikrofon bermasalah";
+  $("t").className = "err";
+  $("s").textContent = msg;
+  $("dot").className = "dot";
+}
+
+async function start() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }
+    });
+  } catch (err) {
+    showError("Izin mikrofon ditolak atau tidak tersedia (" + (err && err.name ? err.name : "error") + ").");
+    return;
+  }
+
+  const AC = window.AudioContext || window.webkitAudioContext;
+  ctx = new AC();
+  try { await ctx.resume(); } catch (e) {}
+
+  const src = ctx.createMediaStreamSource(stream);
+  proc = ctx.createScriptProcessor(4096, 1, 1);
+  const mute = ctx.createGain();
+  mute.gain.value = 0;                       // supaya suara tidak terdengar ulang
+  src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+
+  proc.onaudioprocess = (ev) => {
+    const d = ev.inputBuffer.getChannelData(0);
+    buf.push(new Float32Array(d));
+    bufLen += d.length;
+
+    let s = 0;
+    for (let i = 0; i < d.length; i++) s += d[i] * d[i];
+    const rms = Math.sqrt(s / d.length);
+    level = 0.7 * level + 0.3 * rms;
+    $("lvl").style.width = Math.min(100, Math.round(level * 500)) + "%";
+
+    const target = Math.round(ctx.sampleRate * chunkSec);
+    const secs = Math.floor(bufLen / ctx.sampleRate);
+    if (secs !== lastSecShown) {
+      lastSecShown = secs;
+      $("s").textContent = "Analisis berikutnya dalam " + Math.max(0, chunkSec - secs) + " dtk";
+    }
+    if (bufLen >= target) flush(target);
+  };
+
+  $("t").textContent = "Mikrofon aktif, merekam…";
+  $("dot").className = "dot on";
+
+  try { wake = await navigator.wakeLock.request("screen"); } catch (e) {}
+}
+
+function flush(target) {
+  const all = new Float32Array(bufLen);
+  let o = 0;
+  for (const b of buf) { all.set(b, o); o += b.length; }
+  const chunk = all.subarray(0, target);
+  const rest = all.slice(target);
+  buf = rest.length ? [rest] : [];
+  bufLen = rest.length;
+
+  const pcm = resample(chunk, ctx.sampleRate, OUT_SR);
+  const wav = encodeWav(pcm, OUT_SR);
+  n += 1;
+  send("streamlit:setComponentValue", {
+    value: { id: sess + "-" + n, wav: toBase64(wav), ts: Date.now() },
+    dataType: "json"
+  });
+  $("s").textContent = "Mengirim potongan #" + n + " untuk dianalisis…";
+}
+
+function resample(data, srIn, srOut) {
+  if (srIn === srOut) return data;
+  const ratio = srIn / srOut;
+  const outLen = Math.floor(data.length / ratio);
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {          // rata-rata per jendela (anti-aliasing sederhana)
+    const a = Math.floor(i * ratio);
+    const b = Math.min(data.length, Math.max(a + 1, Math.floor((i + 1) * ratio)));
+    let sum = 0;
+    for (let j = a; j < b; j++) sum += data[j];
+    out[i] = sum / (b - a);
+  }
+  return out;
+}
+
+function encodeWav(samples, sr) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buffer);
+  const w = (off, str) => { for (let i = 0; i < str.length; i++) v.setUint8(off + i, str.charCodeAt(i)); };
+  w(0, "RIFF"); v.setUint32(4, 36 + samples.length * 2, true); w(8, "WAVE"); w(12, "fmt ");
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, "data"); v.setUint32(40, samples.length * 2, true);
+  let off = 44;
+  for (let i = 0; i < samples.length; i++, off += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Uint8Array(buffer);
+}
+
+function toBase64(bytes) {
+  let bin = "";
+  const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+  }
+  return btoa(bin);
+}
+
+function stop() {
+  try { if (proc) proc.disconnect(); } catch (e) {}
+  try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+  try { if (ctx) ctx.close(); } catch (e) {}
+  try { if (wake) wake.release(); } catch (e) {}
+}
+window.addEventListener("pagehide", stop);
+window.addEventListener("beforeunload", stop);
+</script>
+</body>
+</html>
