@@ -217,7 +217,6 @@ def kirim_wa(nomor: str, confidence: float, is_test: bool = False):
         "Sistem mendeteksi suara bayi sedang menangis!\n"
         f"• *Status:* {'UJI COBA KONEKSI (TEST)' if is_test else 'Bayi Menangis'}\n"
         "• *Model:* SVM (RBF Kernel)\n"
-        f"• *Tingkat Keyakinan:* {confidence:.2f}%\n"
         f"• *Waktu:* {jam()} WIB\n\n"
         "Mohon segera periksa kondisi bayi Anda."
     )
@@ -367,11 +366,36 @@ with c2:
         st.session_state.mic_active = False
         st.session_state.last_chunk_id = None
         st.rerun()
+
+if "test_wa_cooldown_until" not in st.session_state:
+    st.session_state.test_wa_cooldown_until = 0.0
+
 with c3:
-    if st.button("📲 Test WA", disabled=not nomor_valid, use_container_width=True):
-        with st.spinner("Mengirim pesan tes…"):
-            ok, msg = kirim_wa(nomor, 99.99, is_test=True)
-        push_notif("Test koneksi WA", msg, "ok" if ok else "cry")
+    sisa_awal = max(0, int(st.session_state.test_wa_cooldown_until - time.time()))
+    
+    @st.fragment(run_every=1 if sisa_awal > 0 else None)
+    def render_tombol_test_wa():
+        sisa_detik = max(0, int(st.session_state.test_wa_cooldown_until - time.time()))
+        sedang_cooldown = sisa_detik > 0
+
+        label_tombol = f"⏳ {sisa_detik}s" if sedang_cooldown else "📲 Test WA"
+
+        if st.button(
+            label_tombol,
+            disabled=(not nomor_valid or sedang_cooldown),
+            use_container_width=True
+        ):
+            with st.spinner("Mengirim pesan tes…"):
+                ok, msg = kirim_wa(nomor, 99.99, is_test=True)
+            push_notif("Test koneksi WA", msg, "ok" if ok else "cry")
+            
+            st.session_state.test_wa_cooldown_until = time.time() + 30
+            st.rerun(scope="app")  # <--- Ubah jadi scope="app" agar timer & notif luar langsung aktif
+
+        if sisa_awal > 0 and sisa_detik == 0:
+            st.rerun(scope="app")  # <--- Ubah jadi scope="app" untuk mematikan timer saat habis
+
+    render_tombol_test_wa()
 
 # Mic aktif: komponen merekam terus di browser, mengirim potongan tiap CHUNK_SECONDS detik
 if st.session_state.mic_active and nomor_valid:
