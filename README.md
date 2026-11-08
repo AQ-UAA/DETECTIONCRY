@@ -51,12 +51,12 @@ docker compose up --build
 Docker akan secara otomatis:
 1. Menginstal dependensi sistem operasi (`libsndfile1`, `ffmpeg`, `curl`).
 2. Menginstal library Python yang terdaftar di `requirements.txt`.
-3. Menjalankan server Streamlit pada port **8501**.
+3. Menjalankan server Streamlit pada port **8022**.
 
 ### 3. Akses Aplikasi
 Buka peramban (browser) dan akses:
-- **Lokal:** `http://localhost:8501`
-- **Server Lab / Proxmox:** `http://<IP-SERVER-PROXMOX>:8501`
+- **Lokal:** `http://localhost:8022`
+- **Server Lab / Proxmox:** `http://<IP-SERVER-PROXMOX>:8022`
 
 ### 4. Menghentikan Aplikasi
 Untuk mematikan container:
@@ -68,15 +68,14 @@ docker compose down
 
 ## 🌐 Informasi Port
 
-- **Port yang dibuka:** `8501` (hanya 1 port).
-- Jika pada server Proxmox port `8501` telah digunakan oleh kelompok lain, Anda dapat mengubah pemetaan port di `docker-compose.yml` (misal `"8502:8501"`).
+- **Port yang dibuka:** `8022` (1 port).
 
 ---
 
 ## 💡 Catatan Pengujian Audio & Mikrofon
 
 - **Akses Mikrofon Browser:** Menurut standar keamanan peramban modern (Chrome/Firefox/Edge), akses mikrofon streaming (`getUserMedia`) hanya diizinkan pada *Secure Context* (`https://` atau `http://localhost`).
-- **Pengujian di Server Lab via IP HTTP:** Jika server lab diakses melalui IP biasa tanpa HTTPS (contoh: `http://192.168.x.x:8501`), browser klien mungkin membatasi mikrofon langsung. Oleh karena itu, gunakan fitur **"📂 Uji dengan file audio (.wav / .mp3)"** yang tersedia di bagian bawah aplikasi untuk menguji klasifikasi suara dengan file rekaman.
+- **Pengujian di Server Lab via IP HTTP:** Jika server lab diakses melalui IP biasa tanpa HTTPS (contoh: `http://192.168.x.x:8022`), browser klien mungkin membatasi mikrofon langsung. Oleh karena itu, gunakan fitur **"📂 Uji dengan file audio (.wav / .mp3)"** yang tersedia di bagian bawah aplikasi untuk menguji klasifikasi suara dengan file rekaman.
 
 ---
 

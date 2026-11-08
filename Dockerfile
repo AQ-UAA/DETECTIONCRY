@@ -26,16 +26,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Salin seluruh kode proyek ke dalam container
 COPY . .
 
-# Expose port aplikasi (Streamlit default port: 8501)
-EXPOSE 8501
+# Expose port aplikasi (Port yang ditentukan: 8022)
+EXPOSE 8022
 
 # Healthcheck untuk memonitor kesiapan aplikasi
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+    CMD curl --fail http://localhost:8022/_stcore/health || exit 1
 
 # Jalankan Streamlit dengan bind ke 0.0.0.0 dan nonaktifkan proteksi CORS/XSRF agar dapat diakses dari IP jaringan server lab
 CMD ["streamlit", "run", "app.py", \
-     "--server.port=8501", \
+     "--server.port=8022", \
      "--server.address=0.0.0.0", \
      "--server.headless=true", \
      "--server.enableCORS=false", \
