@@ -1,0 +1,9 @@
+services:
+  detectioncry:
+    build: .
+    container_name: detectioncry-app
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    environment:
+      - TZ=Asia/Jakarta

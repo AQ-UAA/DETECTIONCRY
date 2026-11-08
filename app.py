@@ -2,9 +2,13 @@ import base64
 import html
 import io
 import time
+import warnings
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+# Abaikan warning format nama fitur scikit-learn agar log container tetap bersih
+warnings.filterwarnings("ignore")
 
 import joblib
 import librosa
