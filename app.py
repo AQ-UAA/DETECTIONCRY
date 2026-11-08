@@ -217,6 +217,7 @@ def kirim_wa(nomor: str, confidence: float, is_test: bool = False):
         "Sistem mendeteksi suara bayi sedang menangis!\n"
         f"• *Status:* {'UJI COBA KONEKSI (TEST)' if is_test else 'Bayi Menangis'}\n"
         "• *Model:* SVM (RBF Kernel)\n"
+        f"• *Keyakinan:* {confidence:.2f}%\n"
         f"• *Waktu:* {jam()} WIB\n\n"
         "Mohon segera periksa kondisi bayi Anda."
     )
@@ -233,7 +234,7 @@ def kirim_wa(nomor: str, confidence: float, is_test: bool = False):
             r = requests.post(
                 WEBHOOK_URL,
                 headers={"x-api-key": WEBHOOK_SECRET},
-                json={"target": nomor, "confidence": round(confidence, 2)},
+                json={"target": nomor, "message": pesan},  # <-- Ubah baris ini jadi "message": pesan
                 timeout=12,
             )
             ok = r.status_code == 200
