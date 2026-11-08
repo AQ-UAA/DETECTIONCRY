@@ -3,6 +3,6 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "8022:8022"
+      - "8022:8501"
     environment:
       - TZ=Asia/Jakarta
