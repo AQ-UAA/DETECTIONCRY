@@ -6,3 +6,5 @@ services:
       - "8022:8501"
     environment:
       - TZ=Asia/Jakarta
+    volumes:
+      - ./.streamlit:/app/.streamlit:ro
